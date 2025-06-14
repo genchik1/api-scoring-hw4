@@ -13,7 +13,7 @@ class BaseModel:
     def validate(self):
         pass
 
-    def __new__(cls, **kwargs) -> Self:  # TODO: можно добавить обработку *args
+    def __new__(cls, **kwargs) -> Self:
         instance = super().__new__(cls)
         fields = [
             key for key, value in cls.__dict__.items() if isinstance(value, Field)
