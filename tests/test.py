@@ -3,7 +3,9 @@ import datetime
 import functools
 import unittest
 
-import api
+import src.consts
+import src.settings
+import src.utils
 
 
 def cases(cases):
@@ -26,26 +28,29 @@ class TestSuite(unittest.TestCase):
         self.settings = {}
 
     def get_response(self, request):
-        return api.method_handler(
+        return src.api.method_handler(
             {"body": request, "headers": self.headers}, self.context, self.settings
         )
 
     def set_valid_auth(self, request):
-        if request.get("login") == api.ADMIN_LOGIN:
+        if request.get("login") == src.settings.ADMIN_LOGIN:
             request["token"] = hashlib.sha512(
-                (datetime.datetime.now().strftime("%Y%m%d%H") + api.ADMIN_SALT).encode(
-                    "utf-8"
-                )
+                (
+                    datetime.datetime.now().strftime("%Y%m%d%H")
+                    + src.settings.ADMIN_SALT
+                ).encode("utf-8")
             ).hexdigest()
         else:
             msg = (
-                request.get("account", "") + request.get("login", "") + api.SALT
+                request.get("account", "")
+                + request.get("login", "")
+                + src.settings.SALT
             ).encode("utf-8")
             request["token"] = hashlib.sha512(msg).hexdigest()
 
     def test_empty_request(self):
         _, code = self.get_response({})
-        self.assertEqual(api.INVALID_REQUEST, code)
+        self.assertEqual(src.consts.INVALID_REQUEST, code)
 
     @cases(
         [
@@ -74,7 +79,7 @@ class TestSuite(unittest.TestCase):
     )
     def test_bad_auth(self, request):
         _, code = self.get_response(request)
-        self.assertEqual(api.FORBIDDEN, code)
+        self.assertEqual(src.consts.FORBIDDEN, code)
 
     @cases(
         [
@@ -86,7 +91,7 @@ class TestSuite(unittest.TestCase):
     def test_invalid_method_request(self, request):
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.INVALID_REQUEST, code)
+        self.assertEqual(src.consts.INVALID_REQUEST, code)
         self.assertTrue(len(response))
 
     @cases(
@@ -137,7 +142,7 @@ class TestSuite(unittest.TestCase):
         }
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.INVALID_REQUEST, code, arguments)
+        self.assertEqual(src.consts.INVALID_REQUEST, code, arguments)
         self.assertTrue(len(response))
 
     @cases(
@@ -172,7 +177,7 @@ class TestSuite(unittest.TestCase):
         }
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.OK, code, arguments)
+        self.assertEqual(src.consts.OK, code, arguments)
         score = response.get("score")
         self.assertTrue(isinstance(score, (int, float)) and score >= 0, arguments)
         self.assertEqual(sorted(self.context["has"]), sorted(arguments.keys()))
@@ -187,7 +192,7 @@ class TestSuite(unittest.TestCase):
         }
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.OK, code)
+        self.assertEqual(src.consts.OK, code)
         score = response.get("score")
         self.assertEqual(score, 42)
 
@@ -210,7 +215,7 @@ class TestSuite(unittest.TestCase):
         }
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.INVALID_REQUEST, code, arguments)
+        self.assertEqual(src.consts.INVALID_REQUEST, code, arguments)
         self.assertTrue(len(response))
 
     @cases(
@@ -232,7 +237,7 @@ class TestSuite(unittest.TestCase):
         }
         self.set_valid_auth(request)
         response, code = self.get_response(request)
-        self.assertEqual(api.OK, code, arguments)
+        self.assertEqual(src.consts.OK, code, arguments)
         self.assertEqual(len(arguments["client_ids"]), len(response))
         self.assertTrue(
             all(

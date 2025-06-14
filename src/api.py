@@ -1,139 +1,87 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import abc
 import json
-import datetime
-import logging
-import hashlib
 import uuid
-from argparse import ArgumentParser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler
+from typing import Any
 
-SALT = "Otus"
-ADMIN_LOGIN = "admin"
-ADMIN_SALT = "42"
-OK = 200
-BAD_REQUEST = 400
-FORBIDDEN = 403
-NOT_FOUND = 404
-INVALID_REQUEST = 422
-INTERNAL_ERROR = 500
-ERRORS = {
-    BAD_REQUEST: "Bad Request",
-    FORBIDDEN: "Forbidden",
-    NOT_FOUND: "Not Found",
-    INVALID_REQUEST: "Invalid Request",
-    INTERNAL_ERROR: "Internal Server Error",
-}
-UNKNOWN = 0
-MALE = 1
-FEMALE = 2
-GENDERS = {
-    UNKNOWN: "unknown",
-    MALE: "male",
-    FEMALE: "female",
+from src.consts import (
+    OK,
+    BAD_REQUEST,
+    NOT_FOUND,
+    INTERNAL_ERROR,
+    ERRORS,
+    INVALID_REQUEST,
+    FORBIDDEN,
+)
+from src.dto import MethodRequest, OnlineScoreRequest, ClientsInterestsRequest
+from src.settings import ADMIN_SALT, SALT, get_logger
+from src.utils import check_auth
+
+logger = get_logger(__name__)
+
+
+validate_per_method = {
+    "online_score": OnlineScoreRequest,
+    "clients_interests": ClientsInterestsRequest,
 }
 
 
-class CharField(object):
-    pass
+def method_handler(request: Any, ctx: Any, store: Any) -> tuple[dict[str, Any], int]:
+    request_body = request["body"]
 
+    try:
+        request = MethodRequest(**request_body)
+    except ValueError as err:
+        logger.exception(str(err))
+        return {"error": str(err)}, INVALID_REQUEST
 
-class ArgumentsField(object):
-    pass
+    if not check_auth(request, ADMIN_SALT, SALT):
+        logger.exception("Ошибка аутентификации")
+        return {"error": "Ошибка аутентификации"}, FORBIDDEN
 
+    if request.method == "online_score" and request.is_admin:
+        return {"score": 42}, OK
 
-class EmailField(CharField):
-    pass
+    try:
+        method_object = validate_per_method[request.method](**request.arguments)
+    except ValueError as err:
+        logger.exception(str(err))
+        return {"error": str(err)}, INVALID_REQUEST
 
+    method_object.set_context(ctx)
 
-class PhoneField(object):
-    pass
-
-
-class DateField(object):
-    pass
-
-
-class BirthDayField(object):
-    pass
-
-
-class GenderField(object):
-    pass
-
-
-class ClientIDsField(object):
-    pass
-
-
-class ClientsInterestsRequest(object):
-    client_ids = ClientIDsField(required=True)
-    date = DateField(required=False, nullable=True)
-
-
-class OnlineScoreRequest(object):
-    first_name = CharField(required=False, nullable=True)
-    last_name = CharField(required=False, nullable=True)
-    email = EmailField(required=False, nullable=True)
-    phone = PhoneField(required=False, nullable=True)
-    birthday = BirthDayField(required=False, nullable=True)
-    gender = GenderField(required=False, nullable=True)
-
-
-class MethodRequest(object):
-    account = CharField(required=False, nullable=True)
-    login = CharField(required=True, nullable=True)
-    token = CharField(required=True, nullable=True)
-    arguments = ArgumentsField(required=True, nullable=True)
-    method = CharField(required=True, nullable=False)
-
-    @property
-    def is_admin(self):
-        return self.login == ADMIN_LOGIN
-
-
-def check_auth(request):
-    if request.is_admin:
-        digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode('utf-8')).hexdigest()
-    else:
-        digest = hashlib.sha512((request.account + request.login + SALT).encode('utf-8')).hexdigest()
-    return digest == request.token
-
-
-def method_handler(request, ctx, store):
-    response, code = None, None
-    return response, code
+    return method_object.calculate(), OK
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
-    router = {
-        "method": method_handler
-    }
+    router = {"method": method_handler}
     store = None
 
     def get_request_id(self, headers):
-        return headers.get('HTTP_X_REQUEST_ID', uuid.uuid4().hex)
+        return headers.get("HTTP_X_REQUEST_ID", uuid.uuid4().hex)
 
     def do_POST(self):
         response, code = {}, OK
         context = {"request_id": self.get_request_id(self.headers)}
         request = None
         try:
-            data_string = self.rfile.read(int(self.headers['Content-Length']))
+            data_string = self.rfile.read(int(self.headers["Content-Length"]))
             request = json.loads(data_string)
-        except:
+        except Exception:
             code = BAD_REQUEST
 
         if request:
             path = self.path.strip("/")
-            logging.info("%s: %s %s" % (self.path, data_string, context["request_id"]))
+            logger.info("%s: %s %s" % (self.path, data_string, context["request_id"]))
             if path in self.router:
                 try:
-                    response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
+                    response, code = self.router[path](
+                        {"body": request, "headers": self.headers}, context, self.store
+                    )
                 except Exception as e:
-                    logging.exception("Unexpected error: %s" % e)
+                    logger.exception("Unexpected error: %s" % e)
                     code = INTERNAL_ERROR
             else:
                 code = NOT_FOUND
@@ -146,22 +94,6 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
         else:
             r = {"error": response or ERRORS.get(code, "Unknown Error"), "code": code}
         context.update(r)
-        logging.info(context)
-        self.wfile.write(json.dumps(r).encode('utf-8'))
+        logger.info(context)
+        self.wfile.write(json.dumps(r).encode("utf-8"))
         return
-
-
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("-p", "--port", action="store", type=int, default=8080)
-    parser.add_argument("-l", "--log", action="store", default=None)
-    args = parser.parse_args()
-    logging.basicConfig(filename=args.log, level=logging.INFO,
-                        format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    server = HTTPServer(("localhost", args.port), MainHTTPHandler)
-    logging.info("Starting server at %s" % args.port)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    server.server_close()
